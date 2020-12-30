@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- example constructed by trimming and annotating popular BBC Podcast -->
+<xsbe:schema-by-example xmlns:xsbe="http://xsbe.couling.uk">
+    <xsbe:root>
+        <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+            <channel xsbe:type="flatten">
+                <title>Newscast</title>
+                <link>http://www.bbc.co.uk/programmes/p05299nl</link>
+                <description>Newscast's Review of the Year.</description>
+                <itunes:summary>Newscast's Review of the Year.</itunes:summary>
+                <itunes:author>BBC Radio</itunes:author>
+                <itunes:owner>
+                    <itunes:name>BBC</itunes:name>
+                    <itunes:email>RadioMusic.Support@bbc.co.uk</itunes:email>
+                </itunes:owner>
+                <itunes:new-feed-url>https://podcasts.files.bbci.co.uk/p05299nl.rss</itunes:new-feed-url>
+                <language>en</language>
+                <image>
+                    <url>http://ichef.bbci.co.uk/images/ic/3000x3000/p08ksmn1.jpg</url>
+                    <title>Newscast</title>
+                    <link>http://www.bbc.co.uk/programmes/p05299nl</link></image>
+                <itunes:image xsbe:name="itunes_image" xsbe:value-from="href" href="http://ichef.bbci.co.uk/images/ic/3000x3000/p08ksmn1.jpg"/>
+                <copyright>(C) BBC 2020</copyright>
+                <pubDate xsbe:name="publish_date">Mon, 28 Dec 2020 11:28:00 +0000</pubDate>
+                <itunes:category xsbe:value-from="text" text="News"/>
+                <itunes:explicit>no</itunes:explicit>
+                <atom:link xsbe:name="atom_link" href="http://www.bbc.co.uk/programmes/p05299nl/episodes/downloads.rss" rel="self" type="application/rss+xml"/>
+
+                <item xsbe:type="repeating" xsbe:name="items">
+                    <title>2020 Vision</title>
+                    <description>In January this year, Brexitcasters </description>
+                    <itunes:subtitle>We zoom through a tumultuous year of news.</itunes:subtitle>
+                    <itunes:summary>In January this year</itunes:summary>
+                    <pubDate xsbe:name="publish_date">Mon, 28 Dec 2020 11:28:00 +0000</pubDate>
+                    <itunes:duration>2303</itunes:duration>
+                    <enclosure url="http://open.live.bbc.co.uk/mediaselector/6/redir/version/2.0/mediaset/audio-nondrm-download/proto/http/vpid/p092lnj6.mp3" length="36848000" type="audio/mpeg"/>
+                    <guid isPermaLink="false">urn:bbc:podcast:p092lpm4</guid>
+                    <link>http://www.bbc.co.uk/programmes/p092lpm4</link>
+                    <itunes:explicit>clean</itunes:explicit>
+                    <itunes:author>BBC Radio</itunes:author>
+                </item>
+            </channel>
+        </rss>
+    </xsbe:root>
+</xsbe:schema-by-example>
