@@ -59,9 +59,7 @@ class XmlNode:
 
     def _normalise_name(self, name: Union[str, Name]) -> Name:
         if isinstance(name, str):
-            return Name(name, self.name.namespace)
-        elif name.namespace is None and self.name.namespace is not None:
-            return Name(name.name, self.name.namespace)
+            return Name(name, None)
         else:
             return name
 
@@ -192,9 +190,17 @@ def _namespace_prefix_sequence() -> Generator[str, None, None]:
 
 def load(source: TextIO) -> XmlNode:
     dom = _parse(source)
-    return from_dom(dom.firstChild)
+    node = dom.firstChild
+    while node.nodeType != xml.dom.Node.ELEMENT_NODE:
+        node = node.nextSibling
+        assert node is not None, "Root not not found!"
+    return from_dom(node)
 
 
 def loads(source: str) -> XmlNode:
     dom = _parseString(source)
-    return from_dom(dom.firstChild)
+    node = dom.firstChild
+    while node.nodeType != xml.dom.Node.ELEMENT_NODE:
+        node = node.nextSibling
+        assert node is not None, "Root not not found!"
+    return from_dom(node)

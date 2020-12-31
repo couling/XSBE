@@ -382,7 +382,7 @@ def _create_element_transformer(element: simple_node.XmlNode, ignore_unexpected:
         default_value = element.attributes.get(_ATTRIBUTE_DEFAULT, None)
         result = TextNodeTransformer(element.name, result_name, ignore_unexpected, text_transform_type, default_value)
     elif _ATTRIBUTE_VALUE_FROM in element.attributes:
-        value_from = simple_node.Name(element.attributes[_ATTRIBUTE_VALUE_FROM], element.name.namespace)
+        value_from = simple_node.Name(element.attributes[_ATTRIBUTE_VALUE_FROM], None)
         text_transform_type = _identify_text_type(element.attributes[value_from])
         exclude_attribute = value_from
         default_value = element.attributes.get(_ATTRIBUTE_DEFAULT, None)
