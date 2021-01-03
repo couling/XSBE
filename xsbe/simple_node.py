@@ -69,7 +69,7 @@ def from_dom(node) -> XmlNode:
     result = XmlNode(Name(namespace=node.namespaceURI, name=node.localName))
     for attribute, value in node.attributes.itemsNS():
         attribute_ns, attribute_name = attribute
-        if attribute_ns != "http://www.w3.org/2000/xmlns/":
+        if attribute_ns not in ("http://www.w3.org/2000/xmlns/", "http://www.w3.org/2001/XMLSchema-instance"):
             result[Name(attribute_name, attribute_ns)] = value
     for child in node.childNodes:
         if child.nodeType == xml.dom.Node.COMMENT_NODE:
