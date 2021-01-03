@@ -396,10 +396,8 @@ def _create_element_transformer(element: simple_node.XmlNode, ignore_unexpected:
     for name, value in element.attributes.items():
         if name == exclude_attribute:
             continue
-        if name.namespace is None:
-            name = simple_node.Name(name.name, element.name.namespace)
         if name.namespace != XSBE_SCHEMA_URI:
-            if name.namespace != element.name.namespace:
+            if name.namespace is not None and name.namespace != element.name.namespace:
                 result_name = f"{name.name}:{name.namespace}"
             else:
                 result_name = name.name
