@@ -1,5 +1,5 @@
 from . import simple_node
-from typing import Optional, Dict, List, Union
+from typing import Optional, Dict, List, Union, TextIO
 import abc
 import email.utils
 import time
@@ -21,6 +21,8 @@ _TYPE_REPEATING = 'repeating'
 _TYPE_MANDATORY = 'mandatory'
 _TYPE_OPTIONAL = 'optional'
 _TYPE_FLATTEN = 'flatten'
+
+_VALUE_KEY = '#value'
 
 
 class ParseFailure(Exception):
@@ -205,6 +207,22 @@ class DocumentTransformer:
     def transform_to_xml(self, value):
         return self.root_transformer.transform_to_xml(value)
 
+    def load(self, file: TextIO):
+        document = simple_node.load(file)
+        return self.transform_from_xml(document)
+
+    def loads(self, content: str):
+        document = simple_node.loads(content)
+        return self.transform_from_xml(document)
+
+    def dump(self, file: TextIO, value, **kwargs):
+        document = self.transform_to_xml(value)
+        return simple_node.dump(file, document, **kwargs)
+
+    def dumps(self, value, **kwargs) -> str:
+        document = self.transform_to_xml(value)
+        return simple_node.dumps(document, **kwargs)
+
 
 class ElementNodeTransformer(BaseNodeTransformer):
 
@@ -285,7 +303,6 @@ class ElementNodeTransformer(BaseNodeTransformer):
 
 
 class TextNodeTransformer(BaseNodeTransformer):
-    _VALUE_KEY = '#value'
 
     def __init__(self, node_name: simple_node.Name, result_name: str, ignore_unexpected: bool,
                  text_transformer: ValueTransformer, default_value: Optional[str] = None):
@@ -316,7 +333,7 @@ class TextNodeTransformer(BaseNodeTransformer):
             value = None
         if value is None:
             if self.is_optional:
-                value = self.default_value()
+                value = self.default_value
             else:
                 raise ParseFailure("Missing text value")
         else:
@@ -324,7 +341,7 @@ class TextNodeTransformer(BaseNodeTransformer):
 
         if self.attributes:
             result = self._parse_attributes(node)
-            result[self._VALUE_KEY] = value
+            result[_VALUE_KEY] = value
             return result
         else:
             return value
@@ -335,7 +352,7 @@ class TextNodeTransformer(BaseNodeTransformer):
         if self.attributes:
             if not isinstance(value, dict):
                 raise TypeError(f"{self.node_name} expects dict, received {str(type(value))}")
-            value = value[self._VALUE_KEY]
+            value = value[_VALUE_KEY]
         return [self._text_transformer.transform_to_xml(value)]
 
     def _attributes_to_xml(self, value: dict) -> Dict[simple_node.Name, str]:
@@ -346,25 +363,38 @@ class TextNodeTransformer(BaseNodeTransformer):
 
 
 def create_transformer(schema_document: simple_node.XmlNode, ignore_unexpected: bool = False) -> DocumentTransformer:
-    if schema_document.name != _SCHEMA_NODE_NAME:
-        raise UnexpectedElement(schema_document.name)
+    if schema_document.name == _SCHEMA_NODE_NAME:
+        document_root: Optional[DocumentTransformer] = None
 
-    document_root: Optional[DocumentTransformer] = None
+        for child in schema_document.children:
 
-    for child in schema_document.children:
-        if not isinstance(child, simple_node.XmlNode):
-            raise ParseFailure(f"Unexpected text node in {_SCHEMA_NODE_NAME}")
-        if child.name == _ROOT_NODE_NAME:
-            if document_root is not None:
-                raise DuplicateElement(_ROOT_NODE_NAME, None)
-            if len(child.children) != 1 or not isinstance(child.children[0], simple_node.XmlNode):
-                raise ParseFailure(f"{_ROOT_NODE_NAME} must contain exactly one child element and not text")
-            document_root = _create_root_transformer(child.children[0], ignore_unexpected)
+            if not isinstance(child, simple_node.XmlNode):
+                raise ParseFailure(f"Unexpected text node in {_SCHEMA_NODE_NAME}")
+            if child.name == _ROOT_NODE_NAME:
+                if document_root is not None:
+                    raise DuplicateElement(_ROOT_NODE_NAME, None)
+                if len(child.children) != 1 or not isinstance(child.children[0], simple_node.XmlNode):
+                    raise ParseFailure(f"{_ROOT_NODE_NAME} must contain exactly one child element and not text")
+                document_root = _create_root_transformer(child.children[0], ignore_unexpected)
 
-    if document_root is None:
-        raise MissingElement(_ROOT_NODE_NAME)
+        if document_root is None:
+            raise MissingElement(_ROOT_NODE_NAME)
+
+    else:
+        # Lite mode schemas do not have enclosing nodes.
+        document_root = _create_root_transformer(schema_document, ignore_unexpected)
 
     return document_root
+
+
+def load_transformer(schema_file: TextIO) -> DocumentTransformer:
+    document = simple_node.load(schema_file)
+    return create_transformer(document)
+
+
+def loads_transformer(schema: str) -> DocumentTransformer:
+    document = simple_node.loads(schema)
+    return create_transformer(document)
 
 
 def _create_root_transformer(root_node: simple_node.XmlNode, ignore_unexpected: bool) -> DocumentTransformer:
@@ -381,7 +411,7 @@ def _create_element_transformer(element: simple_node.XmlNode, ignore_unexpected:
         text_transform_type = _identify_text_type(element.children[0])
         default_value = element.attributes.get(_ATTRIBUTE_DEFAULT, None)
         result = TextNodeTransformer(element.name, result_name, ignore_unexpected, text_transform_type, default_value)
-    elif _ATTRIBUTE_VALUE_FROM in element.attributes:
+    elif _ATTRIBUTE_VALUE_FROM in element.attributes and element.attributes[_ATTRIBUTE_VALUE_FROM]:
         value_from = simple_node.Name(element.attributes[_ATTRIBUTE_VALUE_FROM], None)
         text_transform_type = _identify_text_type(element.attributes[value_from])
         exclude_attribute = value_from

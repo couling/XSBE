@@ -77,6 +77,8 @@ def from_dom(node) -> XmlNode:
         if child.nodeType == xml.dom.Node.TEXT_NODE:
             if child.nodeValue.strip():
                 result.children.append(child.nodeValue)
+        elif child.nodeType == xml.dom.Node.CDATA_SECTION_NODE:
+            result.children.append(child.data)
         else:
             result.children.append(from_dom(child))
     return result
