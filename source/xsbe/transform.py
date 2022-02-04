@@ -1,10 +1,11 @@
-from . import simple_node
-from typing import Optional, Dict, List, Union, TextIO
 import abc
 import email.utils
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, TextIO, Union
 
+from . import simple_node
 
 XSBE_SCHEMA_URI = "http://xsbe.couling.uk"
 
@@ -118,9 +119,37 @@ class BooleanTransformer(ValueTransformer):
         return "true" if value else "false"
 
 
+class ISODateTransformer(ValueTransformer):
+    def transform_from_xml(self, value) -> datetime:
+        return datetime.fromisoformat(value)
+
+    def transform_to_xml(self, value: Union[datetime, float]) -> str:
+        if isinstance(value, float):
+            value = datetime.fromtimestamp(value)
+        return value.isoformat()
+
+
+class ISOZuluDateTransformer(ValueTransformer):
+    def transform_from_xml(self, value) -> datetime:
+        if value[-1] != "Z":
+            raise ValueError("Expected Z timezone")
+        result = datetime.fromisoformat(value[:-1])
+        if result.tzinfo is not None:
+            raise ValueError(f"Invalud date format {value}")
+        return result.replace(tzinfo=timezone.utc)
+
+    def transform_to_xml(self, value: Union[datetime, float]) -> str:
+        if isinstance(value, float):
+            value = datetime.fromtimestamp(value)
+        return value.isoformat() + "Z"
+
+
 class EmailDateTransformer(ValueTransformer):
     def transform_from_xml(self, value) -> datetime:
-        return datetime.fromtimestamp(time.mktime(email.utils.parsedate(value)))
+        try:
+            return datetime.fromtimestamp(time.mktime(email.utils.parsedate(value)))
+        except TypeError:
+            raise ValueError(f"Invalid date {value}")
 
     def transform_to_xml(self, value: Union[datetime, float]) -> str:
         if isinstance(value, datetime):
@@ -362,7 +391,12 @@ class TextNodeTransformer(BaseNodeTransformer):
         return attributes
 
 
-def create_transformer(schema_document: simple_node.XmlNode, ignore_unexpected: bool = False) -> DocumentTransformer:
+def create_transformer(schema_document: Union[str, Path, simple_node.XmlNode],
+                       ignore_unexpected: bool = False) -> DocumentTransformer:
+    if isinstance(schema_document, (str, Path)):
+        with open(schema_document, 'r') as file:
+            schema_document = simple_node.load(file)
+
     if schema_document.name == _SCHEMA_NODE_NAME:
         document_root: Optional[DocumentTransformer] = None
 
@@ -459,8 +493,12 @@ def _identify_text_type(text: str, result_name: Optional[str] = None) -> ValueTr
             return FloatTransformer(result_name=result_name)
         return IntTransformer(result_name=result_name)
 
-    result = email.utils.parsedate(text)
-    if result is not None:
-        return EmailDateTransformer(result_name=result_name)
+    for date_type in (ISODateTransformer, ISOZuluDateTransformer, EmailDateTransformer):
+        try:
+            transformer = date_type(result_name=result_name)
+            transformer.transform_from_xml(text)
+            return transformer
+        except ValueError:
+            pass
 
     return TextTransformer(result_name=result_name)
