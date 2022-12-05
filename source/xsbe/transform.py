@@ -1,22 +1,22 @@
 import abc
 import email.utils
-import time
+import io
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, TextIO, Union
+from typing import Any, BinaryIO, NamedTuple, Optional, TextIO, Union
+from xml.etree import ElementTree
 
-from . import simple_node
+XSBE_SCHEMA_URI = "{http://xsbe.couling.uk}"
 
-XSBE_SCHEMA_URI = "http://xsbe.couling.uk"
-
-_SCHEMA_NODE_NAME = simple_node.Name("schema-by-example", XSBE_SCHEMA_URI)
-_ROOT_NODE_NAME = simple_node.Name("root", XSBE_SCHEMA_URI)
-_PART_NODE_NAME = simple_node.Name("part", XSBE_SCHEMA_URI)
-_REFERENCE_NODE_NAME = simple_node.Name("reference", XSBE_SCHEMA_URI)
-_ATTRIBUTE_RESULT_NAME = simple_node.Name("name", XSBE_SCHEMA_URI)
-_ATTRIBUTE_DEFAULT = simple_node.Name("default", XSBE_SCHEMA_URI)
-_ATTRIBUTE_TYPE = simple_node.Name("type", XSBE_SCHEMA_URI)
-_ATTRIBUTE_VALUE_FROM = simple_node.Name('value-from', XSBE_SCHEMA_URI)
+_SCHEMA_NODE_NAME = f"{XSBE_SCHEMA_URI}schema-by-example"
+_ROOT_NODE_NAME = f"{XSBE_SCHEMA_URI}root"
+_PART_NODE_NAME = f"{XSBE_SCHEMA_URI}part"
+_REFERENCE_NODE_NAME = f"{XSBE_SCHEMA_URI}reference"
+_ATTRIBUTE_RESULT_NAME = f"{XSBE_SCHEMA_URI}name"
+_ATTRIBUTE_DEFAULT = f"{XSBE_SCHEMA_URI}default"
+_ATTRIBUTE_TYPE = f"{XSBE_SCHEMA_URI}type"
+_ATTRIBUTE_VALUE_FROM = f"{XSBE_SCHEMA_URI}value-from"
 
 _TYPE_REPEATING = 'repeating'
 _TYPE_MANDATORY = 'mandatory'
@@ -31,32 +31,32 @@ class ParseFailure(Exception):
 
 
 class UnexpectedAttribute(ParseFailure):
-    def __init__(self, attribute_name: simple_node.Name):
+    def __init__(self, attribute_name: str):
         super().__init__(f"Unexpected attribute '{attribute_name}'")
 
 
 class MissingAttribute(ParseFailure):
-    def __init__(self, element_name: simple_node.Name):
+    def __init__(self, element_name: str):
         super().__init__(f"Missing required attribute '{element_name}'")
 
 
 class UnexpectedElement(ParseFailure):
-    def __init__(self, element_name: simple_node.Name):
+    def __init__(self, element_name: str):
         super().__init__(f"Unexpected element '{element_name}'")
 
 
 class DuplicateElement(ParseFailure):
-    def __init__(self, element_name: simple_node.Name, result_name: Optional[str]):
+    def __init__(self, element_name: str, result_name: Optional[str]):
         super().__init__(f"Duplicate element '{element_name}' ('{result_name}')")
 
 
 class MissingElement(ParseFailure):
-    def __init__(self, element_name: simple_node.Name):
+    def __init__(self, element_name: str):
         super().__init__(f"Missing required element '{element_name}'")
 
 
 class IncorrectRoot(ParseFailure):
-    def __init__(self, expected: simple_node.Name, found: simple_node.Name):
+    def __init__(self, expected: str, found: str):
         super().__init__(f"Expected {expected} at root but found {found}")
 
 
@@ -79,14 +79,18 @@ class ValueTransformer(abc.ABC):
 
     @abc.abstractmethod
     def transform_from_xml(self, value):
-        pass
+        ...
 
+    @abc.abstractmethod
     def transform_to_xml(self, value):
-        return str(value)
+        ...
 
 
 class TextTransformer(ValueTransformer):
     def transform_from_xml(self, value: str) -> str:
+        return value
+
+    def transform_to_xml(self, value: str) -> str:
         return value
 
 
@@ -94,10 +98,16 @@ class IntTransformer(ValueTransformer):
     def transform_from_xml(self, value: str) -> int:
         return int(value)
 
+    def transform_to_xml(self, value: int) -> str:
+        return str(value)
+
 
 class FloatTransformer(ValueTransformer):
     def transform_from_xml(self, value: str) -> float:
         return float(value)
+
+    def transform_to_xml(self, value: float) -> str:
+        return str(value)
 
 
 class BooleanTransformer(ValueTransformer):
@@ -135,7 +145,7 @@ class ISOZuluDateTransformer(ValueTransformer):
             raise ValueError("Expected Z timezone")
         result = datetime.fromisoformat(value[:-1])
         if result.tzinfo is not None:
-            raise ValueError(f"Invalud date format {value}")
+            raise ValueError(f"Invalid date format {value}")
         return result.replace(tzinfo=timezone.utc)
 
     def transform_to_xml(self, value: Union[datetime, float]) -> str:
@@ -147,7 +157,8 @@ class ISOZuluDateTransformer(ValueTransformer):
 class EmailDateTransformer(ValueTransformer):
     def transform_from_xml(self, value) -> datetime:
         try:
-            return datetime.fromtimestamp(time.mktime(email.utils.parsedate(value)))
+            return email.utils.parsedate_to_datetime(value)
+            #return datetime.fromtimestamp(time.mktime(email.utils.parsedate_tz(value)))
         except TypeError:
             raise ValueError(f"Invalid date {value}")
 
@@ -158,29 +169,23 @@ class EmailDateTransformer(ValueTransformer):
 
 
 class BaseNodeTransformer(abc.ABC):
-    node_name: simple_node.Name
+    node_name: str
     result_name: str
     is_optional: bool
     is_repeating: bool
     union_group: Optional[str]
     flatten: bool
-    attributes: Dict[simple_node.Name, ValueTransformer]
+    attributes: dict[str, ValueTransformer]
 
     @abc.abstractmethod
-    def transform_from_xml(self, value: simple_node.XmlNode):
-        pass
-
-    def transform_to_xml(self, value) -> simple_node.XmlNode:
-        node = simple_node.XmlNode(self.node_name)
-        node.attributes = self._attributes_to_xml(value)
-        node.children = self._children_to_xml(value)
-        return node
+    def transform_from_xml(self, value: ElementTree.Element):
+        ...
 
     @abc.abstractmethod
-    def _children_to_xml(self, value) -> List[Union[simple_node.XmlNode, str]]:
-        pass
+    def transform_to_xml(self, value) -> ElementTree.Element:
+        ...
 
-    def __init__(self, node_name: simple_node.Name, result_name: str, ignore_unexpected: bool):
+    def __init__(self, node_name: str, result_name: str, ignore_unexpected: bool):
         self.node_name = node_name
         self.result_name = result_name
         self.is_optional = True
@@ -191,9 +196,9 @@ class BaseNodeTransformer(abc.ABC):
         self.flatten = False
         self.default_value = None
 
-    def _parse_attributes(self, node: simple_node.XmlNode) -> dict:
+    def _parse_attributes(self, node: ElementTree.Element) -> dict:
         result = {}
-        for name, value in node.attributes.items():
+        for name, value in node.attrib.items():
             try:
                 transformer = self.attributes[name]
             except KeyError:
@@ -208,8 +213,8 @@ class BaseNodeTransformer(abc.ABC):
                     result[transformer.result_name] = default
         return result
 
-    def _attributes_to_xml(self, value: dict, exclude_attribute: Optional[simple_node.XmlNode] = None
-                           ) -> Dict[simple_node.Name, str]:
+    def _attributes_to_xml(self, value: dict, exclude_attribute: Optional[ElementTree.Element] = None
+                           ) -> dict[str, str]:
         result = {}
         for name, transformer in self.attributes.items():
             if name == exclude_attribute:
@@ -224,51 +229,69 @@ class BaseNodeTransformer(abc.ABC):
 class DocumentTransformer:
     root_transformer: BaseNodeTransformer
 
-    def __init__(self, name: simple_node.Name, root_transformer: BaseNodeTransformer):
+    def __init__(self, name: str, root_transformer: BaseNodeTransformer):
         self.name = name
         self.root_transformer = root_transformer
 
-    def transform_from_xml(self, value: simple_node.XmlNode):
-        if value.name != self.name:
-            raise IncorrectRoot(found=value.name, expected=self.name)
+    def transform_from_xml(self, value: ElementTree.Element):
+        if value.tag != self.name:
+            raise IncorrectRoot(found=value.tag, expected=self.name)
         return self.root_transformer.transform_from_xml(value)
 
     def transform_to_xml(self, value):
         return self.root_transformer.transform_to_xml(value)
 
-    def load(self, file: TextIO):
-        document = simple_node.load(file)
-        return self.transform_from_xml(document)
+    def load(self, file: Union[TextIO, BinaryIO, str, Path]) -> Any:
+        document = ElementTree.parse(file)
+        return self.transform_from_xml(document.getroot())
 
-    def loads(self, content: str):
-        document = simple_node.loads(content)
-        return self.transform_from_xml(document)
+    def loads(self, content: Union[str, bytes]) -> Any:
+        if isinstance(content, str):
+            content_reader = io.StringIO(content)
+        elif isinstance(content, bytes):
+            content_reader = io.BytesIO(content)
+        else:
+            raise TypeError(f"Expected content of type str or bytes, go {type(content).__name__}")
+        return self.load(content_reader)
 
-    def dump(self, file: TextIO, value, **kwargs):
-        document = self.transform_to_xml(value)
-        return simple_node.dump(file, document, **kwargs)
+    def dump(self, file: BinaryIO, value, **kwargs):
+        root_node = self.transform_to_xml(value)
+        document = ElementTree.ElementTree(root_node)
+        return document.write(
+            file,
+            encoding=kwargs.pop("encoding", "utf-8"),
+            xml_declaration=kwargs.pop("xml_declaration", True),
+            **kwargs,
+        )
 
     def dumps(self, value, **kwargs) -> str:
-        document = self.transform_to_xml(value)
-        return simple_node.dumps(document, **kwargs)
+        output = io.BytesIO()
+        self.dump(output, value, **kwargs)
+        return output.getvalue().decode(kwargs.get("encoding", "utf-8"))
 
 
 class ElementNodeTransformer(BaseNodeTransformer):
 
-    children: Dict[simple_node.Name, BaseNodeTransformer]
+    children: dict[str, BaseNodeTransformer]
 
-    def __init__(self, node_name: simple_node.Name, result_name: str, ignore_unexpected: bool):
+    def __init__(self, node_name: str, result_name: str, ignore_unexpected: bool):
         super().__init__(node_name, result_name, ignore_unexpected)
         self.children = {}
 
-    def transform_from_xml(self, node: simple_node.XmlNode):
+    def transform_from_xml(self, node: ElementTree.Element):
         result = self._parse_children(node)
         self._set_defaults(result)
         if self.attributes:
             result.update(self._parse_attributes(node))
         return result
 
-    def _children_to_xml(self, value: Dict) -> List[Union[simple_node.XmlNode, str]]:
+    def transform_to_xml(self, value) -> ElementTree.Element:
+        node = ElementTree.Element(self.node_name)
+        node.attrib = self._attributes_to_xml(value)
+        node.extend(self._children_to_xml(value))
+        return node
+
+    def _children_to_xml(self, value: dict) -> list[Union[ElementTree.Element, str]]:
         result = []
         for child in self.children.values():
             if child.is_repeating:
@@ -293,20 +316,20 @@ class ElementNodeTransformer(BaseNodeTransformer):
 
         return result
 
-    def _parse_children(self, node: simple_node.XmlNode) -> dict:
+    def _parse_children(self, node: ElementTree.Element) -> dict:
         # Initialise any child that is a list to an empty list
         result = {child.result_name: [] for child in self.children.values() if child.is_repeating}
 
         # Process the children
-        for child in node.children:
+        for child in node:
             if isinstance(child, str):
                 raise ParseFailure(f"Unexpected text node '{child}'")
             try:
-                child_transformer = self.children[child.name]
+                child_transformer = self.children[child.tag]
             except KeyError:
                 if self._ignore_unexpected:
                     continue
-                raise UnexpectedElement(child.name)
+                raise UnexpectedElement(child.tag)
             if child_transformer.is_repeating:
                 result[child_transformer.result_name].append(child_transformer.transform_from_xml(child))
             else:
@@ -314,7 +337,7 @@ class ElementNodeTransformer(BaseNodeTransformer):
                     result.update(child_transformer.transform_from_xml(child))
                 else:
                     if child_transformer.result_name in result:
-                        raise DuplicateElement(child.name, child_transformer.result_name)
+                        raise DuplicateElement(child.tag, child_transformer.result_name)
                     result[child_transformer.result_name] = child_transformer.transform_from_xml(child)
 
         return result
@@ -333,7 +356,7 @@ class ElementNodeTransformer(BaseNodeTransformer):
 
 class TextNodeTransformer(BaseNodeTransformer):
 
-    def __init__(self, node_name: simple_node.Name, result_name: str, ignore_unexpected: bool,
+    def __init__(self, node_name: str, result_name: str, ignore_unexpected: bool,
                  text_transformer: ValueTransformer, default_value: Optional[str] = None):
         super().__init__(node_name, result_name, ignore_unexpected)
         self._text_transformer = text_transformer
@@ -341,25 +364,23 @@ class TextNodeTransformer(BaseNodeTransformer):
             self.default_value = self._text_transformer.transform_from_xml(default_value)
         self.value_from = None
 
-    def transform_from_xml(self, node: simple_node.XmlNode):
+    def transform_from_xml(self, node: ElementTree.Element):
         if self.value_from:
-            if node.children:
+            if len(node) > 0:
                 if not self._ignore_unexpected:
                     if isinstance(node.children, str):
                         raise ParseFailure("Unexpected text node in %s", node.name)
                     else:
                         raise UnexpectedElement(node.children[0])
-            value = node.attributes.get(self.value_from, None)
-        elif node.children:
-            if not isinstance(node.children[0], str):
-                unexpected_child = node.children[0]
-                raise UnexpectedElement(unexpected_child.name)
-            if len(node.children) > 1:
-                unexpected_child = node.children[0]
-                raise UnexpectedElement(unexpected_child.name)
-            value = node.children[0].strip()
+            value = node.attrib.get(self.value_from, None)
+        elif len(node):
+            raise UnexpectedElement(next(iter(node)))
         else:
-            value = None
+            value = node.text
+            if value is not None:
+                value = value.strip()
+                if not value:
+                    value = None
         if value is None:
             if self.is_optional:
                 value = self.default_value
@@ -375,7 +396,17 @@ class TextNodeTransformer(BaseNodeTransformer):
         else:
             return value
 
-    def _children_to_xml(self, value) -> List[Union[simple_node.XmlNode, str]]:
+    def transform_to_xml(self, value) -> ElementTree.Element:
+        node = ElementTree.Element(self.node_name)
+        node.attrib = self._attributes_to_xml(value)
+        text_value = self._text_transformer.transform_to_xml(value)
+        if self.value_from is not None:
+            node.attrib[self.value_from] = text_value
+        else:
+            node.text = text_value
+        return node
+
+    def _children_to_xml(self, value) -> list[Union[ElementTree.Element, str]]:
         if self.value_from is not None:
             return []
         if self.attributes:
@@ -384,32 +415,25 @@ class TextNodeTransformer(BaseNodeTransformer):
             value = value[_VALUE_KEY]
         return [self._text_transformer.transform_to_xml(value)]
 
-    def _attributes_to_xml(self, value: dict) -> Dict[simple_node.Name, str]:
-        attributes = super()._attributes_to_xml(value)
-        if self.value_from is not None:
-            attributes[self.value_from] = self._text_transformer.transform_to_xml(value)
-        return attributes
 
-
-def create_transformer(schema_document: Union[str, Path, simple_node.XmlNode],
+def create_transformer(schema_document: Union[str, Path, TextIO, BinaryIO, ElementTree.Element],
                        ignore_unexpected: bool = False) -> DocumentTransformer:
-    if isinstance(schema_document, (str, Path)):
-        with open(schema_document, 'r') as file:
-            schema_document = simple_node.load(file)
+    if isinstance(schema_document, (str, Path)) or hasattr(schema_document, 'read'):
+        with ExitStack() as stack:
+            if isinstance(str, Path):
+                schema_document = stack.enter_context(open(schema_document, 'r'))
+            schema_document = ElementTree.parse(schema_document).getroot()
 
-    if schema_document.name == _SCHEMA_NODE_NAME:
+    if schema_document.tag == _SCHEMA_NODE_NAME:
         document_root: Optional[DocumentTransformer] = None
 
-        for child in schema_document.children:
-
-            if not isinstance(child, simple_node.XmlNode):
-                raise ParseFailure(f"Unexpected text node in {_SCHEMA_NODE_NAME}")
-            if child.name == _ROOT_NODE_NAME:
+        for child in schema_document:
+            if child.tag == _ROOT_NODE_NAME:
                 if document_root is not None:
                     raise DuplicateElement(_ROOT_NODE_NAME, None)
-                if len(child.children) != 1 or not isinstance(child.children[0], simple_node.XmlNode):
-                    raise ParseFailure(f"{_ROOT_NODE_NAME} must contain exactly one child element and not text")
-                document_root = _create_root_transformer(child.children[0], ignore_unexpected)
+                if len(child) != 1:
+                    raise ParseFailure(f"{_ROOT_NODE_NAME} must contain exactly one child element")
+                document_root = _create_root_transformer(next(iter(child)), ignore_unexpected)
 
         if document_root is None:
             raise MissingElement(_ROOT_NODE_NAME)
@@ -421,53 +445,44 @@ def create_transformer(schema_document: Union[str, Path, simple_node.XmlNode],
     return document_root
 
 
-def load_transformer(schema_file: TextIO) -> DocumentTransformer:
-    document = simple_node.load(schema_file)
-    return create_transformer(document)
-
-
-def loads_transformer(schema: str) -> DocumentTransformer:
-    document = simple_node.loads(schema)
-    return create_transformer(document)
-
-
-def _create_root_transformer(root_node: simple_node.XmlNode, ignore_unexpected: bool) -> DocumentTransformer:
+def _create_root_transformer(root_node: ElementTree.Element, ignore_unexpected: bool) -> DocumentTransformer:
     element_transformer = _create_element_transformer(root_node, ignore_unexpected)
-    return DocumentTransformer(root_node.name, element_transformer)
+    return DocumentTransformer(root_node.tag, element_transformer)
 
 
-def _create_element_transformer(element: simple_node.XmlNode, ignore_unexpected: bool) -> BaseNodeTransformer:
-    result_name = element.attributes.get(_ATTRIBUTE_RESULT_NAME, element.name.name)
+def _create_element_transformer(element: ElementTree.Element, ignore_unexpected: bool) -> BaseNodeTransformer:
+    result_name = element.attrib.get(_ATTRIBUTE_RESULT_NAME, split_qualified_name(element.tag).name)
     exclude_attribute = None
-    if element.children and isinstance(element.children[0], str):
-        if len(element.children) != 1:
+    if element.text and element.text.strip():
+        if len(element):
             raise ParseFailure(f"Cannot represent mixed content XML documents")
-        text_transform_type = _identify_text_type(element.children[0])
-        default_value = element.attributes.get(_ATTRIBUTE_DEFAULT, None)
-        result = TextNodeTransformer(element.name, result_name, ignore_unexpected, text_transform_type, default_value)
-    elif _ATTRIBUTE_VALUE_FROM in element.attributes and element.attributes[_ATTRIBUTE_VALUE_FROM]:
-        value_from = simple_node.Name(element.attributes[_ATTRIBUTE_VALUE_FROM], None)
-        text_transform_type = _identify_text_type(element.attributes[value_from])
+        text_transform_type = _identify_text_type(element.text.strip())
+        default_value = element.attrib.get(_ATTRIBUTE_DEFAULT, None)
+        result = TextNodeTransformer(element.tag, result_name, ignore_unexpected, text_transform_type, default_value)
+    elif _ATTRIBUTE_VALUE_FROM in element.attrib:
+        value_from = split_qualified_name(element.attrib[_ATTRIBUTE_VALUE_FROM]).name
+        text_transform_type = _identify_text_type(element.attrib[value_from])
         exclude_attribute = value_from
-        default_value = element.attributes.get(_ATTRIBUTE_DEFAULT, None)
-        result = TextNodeTransformer(element.name, result_name, ignore_unexpected, text_transform_type, default_value)
+        default_value = element.attrib.get(_ATTRIBUTE_DEFAULT, None)
+        result = TextNodeTransformer(element.tag, result_name, ignore_unexpected, text_transform_type, default_value)
         result.value_from = value_from
     else:
-        result = ElementNodeTransformer(element.name, result_name, ignore_unexpected)
-        result.children = {child.name: _create_element_transformer(child, ignore_unexpected)
-                           for child in element.children}
+        result = ElementNodeTransformer(element.tag, result_name, ignore_unexpected)
+        result.children = {child.tag: _create_element_transformer(child, ignore_unexpected) for child in element}
 
-    for name, value in element.attributes.items():
+    element_name = split_qualified_name(element.tag)
+    for name, value in element.attrib.items():
         if name == exclude_attribute:
             continue
-        if name.namespace != XSBE_SCHEMA_URI:
-            if name.namespace is not None and name.namespace != element.name.namespace:
-                result_name = f"{name.name}:{name.namespace}"
+        if not name.startswith(XSBE_SCHEMA_URI):
+            split_name = split_qualified_name(name)
+            if split_name.namespace is not None and split_name.namespace != element_name.namespace:
+                result_name = name
             else:
-                result_name = name.name
+                result_name = split_name.name
             result.attributes[name] = _identify_text_type(value, result_name)
 
-    node_type = element.attributes.get(_ATTRIBUTE_TYPE, _TYPE_OPTIONAL)
+    node_type = element.attrib.get(_ATTRIBUTE_TYPE, _TYPE_OPTIONAL)
     if node_type != _TYPE_OPTIONAL:
         if node_type == _TYPE_MANDATORY:
             result.is_optional = False
@@ -502,3 +517,15 @@ def _identify_text_type(text: str, result_name: Optional[str] = None) -> ValueTr
             pass
 
     return TextTransformer(result_name=result_name)
+
+
+class QualifiedName(NamedTuple):
+    namespace: Optional[str]
+    name: str
+
+
+def split_qualified_name(tag: str) -> QualifiedName[Optional[str], str]:
+    if tag[0] == "{":
+        position = tag.index("}")
+        return QualifiedName(tag[1:position], tag[position+1:])
+    return QualifiedName(None, tag)
