@@ -496,6 +496,9 @@ def _create_element_transformer(element: ElementTree.Element, ignore_unexpected:
     return result
 
 
+DATE_TRANSFORMERS = [ISODateTransformer, ISOZuluDateTransformer, EmailDateTransformer]
+
+
 def _identify_text_type(text: str, result_name: Optional[str] = None) -> ValueTransformer:
     if text in BooleanTransformer.MAP:
         return BooleanTransformer(result_name=result_name)
@@ -508,7 +511,7 @@ def _identify_text_type(text: str, result_name: Optional[str] = None) -> ValueTr
             return FloatTransformer(result_name=result_name)
         return IntTransformer(result_name=result_name)
 
-    for date_type in (ISODateTransformer, ISOZuluDateTransformer, EmailDateTransformer):
+    for date_type in DATE_TRANSFORMERS:
         try:
             transformer = date_type(result_name=result_name)
             transformer.transform_from_xml(text)
